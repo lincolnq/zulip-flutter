@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' as intl;
 
 import '../model/recent_conversations.dart';
+import '../model/unreads.dart';
 import 'icons.dart';
 import 'message_list.dart';
 import 'page.dart';
 import 'store.dart';
 import 'theme.dart';
-import 'unread_count_badge.dart';
 import 'user.dart';
 
 class RecentConversationsPageBody extends StatefulWidget {
@@ -23,14 +23,19 @@ const double _kFetchBufferPixels = 500;
 class _RecentConversationsPageBodyState extends State<RecentConversationsPageBody>
     with PerAccountStoreAwareStateMixin<RecentConversationsPageBody> {
   RecentConversationsView? model;
+  Unreads? _unreads;
   final ScrollController _scrollController = ScrollController();
 
   @override
   void onNewStore() {
     model?.removeListener(_modelChanged);
+    _unreads?.removeListener(_unreadsChanged);
+
     final store = PerAccountStoreWidget.of(context);
     model = store.recentConversationsView
       ..addListener(_modelChanged);
+    _unreads = store.unreads
+      ..addListener(_unreadsChanged);
 
     // Trigger initial fetch to populate previews
     // PerAccountStore implements ChannelStore
@@ -40,8 +45,15 @@ class _RecentConversationsPageBodyState extends State<RecentConversationsPageBod
   @override
   void dispose() {
     model?.removeListener(_modelChanged);
+    _unreads?.removeListener(_unreadsChanged);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _unreadsChanged() {
+    setState(() {
+      // Rebuild to reflect updated unread counts
+    });
   }
 
   void _modelChanged() {
@@ -139,7 +151,7 @@ class RecentConversationItem extends StatelessWidget {
   final RecentConversation conversation;
   final VoidCallback onTap;
 
-  static const double _avatarSize = 40;
+  static const double _avatarSize = 58;
 
   @override
   Widget build(BuildContext context) {
@@ -304,7 +316,7 @@ class RecentConversationItem extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -314,31 +326,23 @@ class RecentConversationItem extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(child: title),
-                        const SizedBox(width: 8),
-                        _RecencyIndicator(timestamp: conversation.latestTimestamp),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
+                    title,
+                    const SizedBox(height: 2),
                     previewWidget,
                   ],
                 ),
               ),
-              if (unreadCount > 0) ...[
-                const SizedBox(width: 8),
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: UnreadCountBadge(
-                    channelIdForBackground: switch (conversation) {
-                      RecentTopicConversation(:final streamId) => streamId,
-                      RecentDmConversation() => null,
-                    },
-                    count: unreadCount,
-                  ),
-                ),
-              ],
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  _RecencyIndicator(timestamp: conversation.latestTimestamp),
+                  if (unreadCount > 0) ...[
+                    const SizedBox(height: 4),
+                    _SignalStyleUnreadBadge(count: unreadCount),
+                  ],
+                ],
+              ),
             ],
           ),
         ),
@@ -462,6 +466,39 @@ class _ChannelTopicTitle extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class _SignalStyleUnreadBadge extends StatelessWidget {
+  const _SignalStyleUnreadBadge({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    // Signal uses a blue pill/circle with white text
+    const badgeColor = Color(0xFF2C6BED);
+    final displayCount = count > 99 ? '99+' : count.toString();
+
+    return Container(
+      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: badgeColor,
+        borderRadius: BorderRadius.circular(10), // Half of minHeight for pill shape
+      ),
+      child: Center(
+        child: Text(
+          displayCount,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            height: 1,
+          ),
+        ),
+      ),
     );
   }
 }
