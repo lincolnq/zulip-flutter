@@ -23,6 +23,7 @@ const double _kFetchBufferPixels = 500;
 class _RecentConversationsPageBodyState extends State<RecentConversationsPageBody>
     with PerAccountStoreAwareStateMixin<RecentConversationsPageBody> {
   RecentConversationsView? model;
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void onNewStore() {
@@ -39,6 +40,7 @@ class _RecentConversationsPageBodyState extends State<RecentConversationsPageBod
   @override
   void dispose() {
     model?.removeListener(_modelChanged);
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -46,6 +48,27 @@ class _RecentConversationsPageBodyState extends State<RecentConversationsPageBod
     setState(() {
       // The actual state lives in [model].
     });
+
+    // After the frame renders, check if we need more content to fill the viewport
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchMoreIfNeeded();
+    });
+  }
+
+  void _fetchMoreIfNeeded() {
+    if (!mounted) return;
+    final model = this.model;
+    if (model == null || model.isBackfilling || model.hasReachedOldest) return;
+
+    // Check if content fills the viewport
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+
+    // If maxScrollExtent is 0, content doesn't fill the viewport - fetch more
+    if (position.maxScrollExtent == 0) {
+      final store = PerAccountStoreWidget.of(context);
+      model.fetchOlder(store.connection, store);
+    }
   }
 
   void _navigateToConversation(RecentConversation conversation) {
@@ -83,6 +106,7 @@ class _RecentConversationsPageBodyState extends State<RecentConversationsPageBod
       child: NotificationListener<ScrollNotification>(
         onNotification: _handleScrollNotification,
         child: ListView.builder(
+          controller: _scrollController,
           itemCount: sorted.length + (model!.isBackfilling ? 1 : 0),
           itemBuilder: (context, index) {
             // Show loading indicator at the end while backfilling
