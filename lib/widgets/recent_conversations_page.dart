@@ -17,6 +17,9 @@ class RecentConversationsPageBody extends StatefulWidget {
   State<RecentConversationsPageBody> createState() => _RecentConversationsPageBodyState();
 }
 
+/// Buffer in pixels before triggering a fetch for more conversations.
+const double _kFetchBufferPixels = 500;
+
 class _RecentConversationsPageBodyState extends State<RecentConversationsPageBody>
     with PerAccountStoreAwareStateMixin<RecentConversationsPageBody> {
   RecentConversationsView? model;
@@ -24,8 +27,13 @@ class _RecentConversationsPageBodyState extends State<RecentConversationsPageBod
   @override
   void onNewStore() {
     model?.removeListener(_modelChanged);
-    model = PerAccountStoreWidget.of(context).recentConversationsView
+    final store = PerAccountStoreWidget.of(context);
+    model = store.recentConversationsView
       ..addListener(_modelChanged);
+
+    // Trigger initial fetch to populate previews
+    // PerAccountStore implements ChannelStore
+    model!.fetchInitial(store.connection, store);
   }
 
   @override
@@ -46,26 +54,52 @@ class _RecentConversationsPageBodyState extends State<RecentConversationsPageBod
         narrow: conversation.narrow));
   }
 
+  void _handleScrollMetrics(ScrollMetrics metrics) {
+    final store = PerAccountStoreWidget.of(context);
+    // Trigger fetch when near bottom of list
+    if (metrics.extentAfter < _kFetchBufferPixels) {
+      model?.fetchOlder(store.connection, store);
+    }
+  }
+
+  bool _handleScrollNotification(ScrollNotification notification) {
+    if (notification is ScrollUpdateNotification) {
+      _handleScrollMetrics(notification.metrics);
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final sorted = model!.sorted;
 
-    if (sorted.isEmpty) {
+    if (sorted.isEmpty && !model!.isBackfilling) {
       return const PageBodyEmptyContentPlaceholder(
         header: 'No recent conversations',
         message: 'Your recent conversations will appear here');
     }
 
     return SafeArea(
-      child: ListView.builder(
-        itemCount: sorted.length,
-        itemBuilder: (context, index) {
-          final conversation = sorted[index];
-          return RecentConversationItem(
-            conversation: conversation,
-            onTap: () => _navigateToConversation(conversation),
-          );
-        },
+      child: NotificationListener<ScrollNotification>(
+        onNotification: _handleScrollNotification,
+        child: ListView.builder(
+          itemCount: sorted.length + (model!.isBackfilling ? 1 : 0),
+          itemBuilder: (context, index) {
+            // Show loading indicator at the end while backfilling
+            if (index == sorted.length) {
+              return const Padding(
+                padding: EdgeInsets.all(16),
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+
+            final conversation = sorted[index];
+            return RecentConversationItem(
+              conversation: conversation,
+              onTap: () => _navigateToConversation(conversation),
+            );
+          },
+        ),
       ),
     );
   }

@@ -1,8 +1,10 @@
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 
+import '../api/core.dart';
 import '../api/model/events.dart';
 import '../api/model/model.dart';
+import '../api/route/messages.dart';
 import 'channel.dart';
 import 'content_preview.dart';
 import 'narrow.dart';
@@ -189,6 +191,17 @@ class RecentConversationsView extends PerAccountStoreBase with ChangeNotifier {
         _previewCache = previewCache,
         _timestampCache = timestampCache,
         _senderCache = senderCache;
+
+  // Backfill state
+  int? _oldestMessageIdSeen;
+  bool _reachedOldest = false;
+  bool _initialFetchDone = false;
+
+  /// Whether a backfill fetch is currently in progress.
+  bool isBackfilling = false;
+
+  /// Whether all historical messages have been fetched.
+  bool get hasReachedOldest => _reachedOldest;
 
   /// All recent conversations, sorted by latestMessageId descending.
   final QueueList<RecentConversation> sorted;
@@ -398,6 +411,221 @@ class RecentConversationsView extends PerAccountStoreBase with ChangeNotifier {
       _previewCache.remove(id);
       _timestampCache.remove(id);
       _senderCache.remove(id);
+    }
+  }
+
+  /// Fetch initial messages from the server to populate previews.
+  ///
+  /// Uses CombinedFeed to get recent messages, then filters locally
+  /// for notification-relevant conversations (DMs, mentions, alerts, followed).
+  Future<void> fetchInitial(ApiConnection connection, ChannelStore channels) async {
+    if (isBackfilling || _initialFetchDone) return;
+    isBackfilling = true;
+    notifyListeners();
+
+    try {
+      final result = await getMessages(connection,
+        narrow: const CombinedFeedNarrow().apiEncode(),
+        anchor: AnchorCode.newest,
+        numBefore: 100,
+        numAfter: 0,
+        allowEmptyTopicName: true);
+
+      // Filter for notification-relevant messages
+      final relevant = result.messages
+          .where((m) => _isNotificationRelevant(m, channels))
+          .toList();
+
+      _processBackfillMessages(relevant);
+
+      if (result.messages.isNotEmpty) {
+        _oldestMessageIdSeen = result.messages.last.id;
+      }
+      _reachedOldest = result.foundOldest;
+      _initialFetchDone = true;
+    } finally {
+      isBackfilling = false;
+      notifyListeners();
+    }
+  }
+
+  /// Fetch older messages for pagination.
+  Future<void> fetchOlder(ApiConnection connection, ChannelStore channels) async {
+    if (isBackfilling || _reachedOldest || _oldestMessageIdSeen == null) return;
+    isBackfilling = true;
+    notifyListeners();
+
+    try {
+      final result = await getMessages(connection,
+        narrow: const CombinedFeedNarrow().apiEncode(),
+        anchor: NumericAnchor(_oldestMessageIdSeen!),
+        includeAnchor: false,
+        numBefore: 100,
+        numAfter: 0,
+        allowEmptyTopicName: true);
+
+      // Filter for notification-relevant messages
+      final relevant = result.messages
+          .where((m) => _isNotificationRelevant(m, channels))
+          .toList();
+
+      _processBackfillMessages(relevant);
+
+      if (result.messages.isNotEmpty) {
+        _oldestMessageIdSeen = result.messages.last.id;
+      }
+      _reachedOldest = result.foundOldest;
+    } finally {
+      isBackfilling = false;
+      notifyListeners();
+    }
+  }
+
+  /// Check if a message is notification-relevant.
+  ///
+  /// Returns true for:
+  /// - All DM messages
+  /// - Stream messages where user was @-mentioned
+  /// - Stream messages with user's alert words
+  /// - Stream messages in followed topics
+  bool _isNotificationRelevant(Message message, ChannelStore channels) {
+    // All DMs are notification-relevant
+    if (message is DmMessage) return true;
+
+    // Stream messages: check flags and followed status
+    if (message is StreamMessage) {
+      // @-mentioned (includes wildcard mentions)
+      if (message.flags.contains(MessageFlag.mentioned) ||
+          message.flags.contains(MessageFlag.wildcardMentioned)) {
+        return true;
+      }
+
+      // Alert word
+      if (message.flags.contains(MessageFlag.hasAlertWord)) return true;
+
+      // Followed topic
+      final policy = channels.topicVisibilityPolicy(message.streamId, message.topic);
+      if (policy == UserTopicVisibilityPolicy.followed) return true;
+    }
+
+    return false;
+  }
+
+  /// Process messages from backfill, updating caches and conversation list.
+  void _processBackfillMessages(List<Message> messages) {
+    for (final message in messages) {
+      final messageId = message.id;
+
+      // Cache metadata
+      _previewCache[messageId] = extractPreviewText(message.content);
+      _timestampCache[messageId] = message.timestamp;
+      _senderCache[messageId] = message.senderId;
+
+      // Update conversation in sorted list
+      switch (message) {
+        case StreamMessage():
+          _updateTopicFromBackfill(message);
+        case DmMessage():
+          _updateDmFromBackfill(message);
+      }
+    }
+
+    _evictCacheIfNeeded();
+  }
+
+  void _updateTopicFromBackfill(StreamMessage message) {
+    final streamId = message.streamId;
+    final topic = message.topic;
+    final messageId = message.id;
+
+    final topicsMap = _topicLatest.putIfAbsent(streamId, makeTopicKeyedMap);
+    final prev = topicsMap[topic];
+
+    if (prev == null) {
+      // New conversation from backfill
+      topicsMap[topic] = messageId;
+      final conv = RecentTopicConversation(
+        streamId: streamId,
+        topic: topic,
+        latestMessageId: messageId,
+        latestTimestamp: message.timestamp,
+        previewText: _previewCache[messageId],
+        latestSenderId: message.senderId,
+      );
+      _insertSorted(conv);
+    } else if (messageId > prev) {
+      // Found a newer message than what we had
+      topicsMap[topic] = messageId;
+
+      // Remove old entry and insert updated one
+      final oldConv = RecentTopicConversation(
+        streamId: streamId,
+        topic: topic,
+        latestMessageId: prev,
+        latestTimestamp: 0,
+        previewText: null,
+        latestSenderId: 0,
+      );
+      _removeSorted(oldConv);
+
+      final newConv = RecentTopicConversation(
+        streamId: streamId,
+        topic: topic,
+        latestMessageId: messageId,
+        latestTimestamp: message.timestamp,
+        previewText: _previewCache[messageId],
+        latestSenderId: message.senderId,
+      );
+      _insertSorted(newConv);
+    } else if (_previewCache[prev] == null) {
+      // We have a newer message ID but no preview - update preview from this message
+      // This can happen when initial data came from unreads (just message IDs)
+      // In this case we should update the conversation to use the backfilled data
+      // Actually, we should update the cached preview for the newer message if we find it
+      // For now, just populate the preview for this older message
+      // The conversation will keep its newer message ID but won't have preview
+    }
+  }
+
+  void _updateDmFromBackfill(DmMessage message) {
+    final dmNarrow = DmNarrow.ofMessage(message, selfUserId: selfUserId);
+    final messageId = message.id;
+
+    final prev = _dmLatest[dmNarrow];
+
+    if (prev == null) {
+      // New conversation from backfill
+      _dmLatest[dmNarrow] = messageId;
+      final conv = RecentDmConversation(
+        dmNarrow: dmNarrow,
+        latestMessageId: messageId,
+        latestTimestamp: message.timestamp,
+        previewText: _previewCache[messageId],
+        latestSenderId: message.senderId,
+      );
+      _insertSorted(conv);
+    } else if (messageId > prev) {
+      // Found a newer message than what we had
+      _dmLatest[dmNarrow] = messageId;
+
+      // Remove old entry and insert updated one
+      final oldConv = RecentDmConversation(
+        dmNarrow: dmNarrow,
+        latestMessageId: prev,
+        latestTimestamp: 0,
+        previewText: null,
+        latestSenderId: 0,
+      );
+      _removeSorted(oldConv);
+
+      final newConv = RecentDmConversation(
+        dmNarrow: dmNarrow,
+        latestMessageId: messageId,
+        latestTimestamp: message.timestamp,
+        previewText: _previewCache[messageId],
+        latestSenderId: message.senderId,
+      );
+      _insertSorted(newConv);
     }
   }
 }
