@@ -13,8 +13,8 @@ import 'button.dart';
 import 'color.dart';
 import 'icons.dart';
 import 'image.dart';
-import 'inbox.dart';
 import 'inset_shadow.dart';
+import 'recent_conversations_page.dart';
 import 'message_list.dart';
 import 'page.dart';
 import 'profile.dart';
@@ -93,7 +93,7 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     const pageBodies = [
-      (_HomePageTab.inbox,          InboxPageBody()),
+      (_HomePageTab.inbox,          RecentConversationsPageBody()),
       (_HomePageTab.channels,       SubscriptionListPageBody()),
       // TODO(#1094): Users
       (_HomePageTab.directMessages, RecentDmConversationsPageBody()),

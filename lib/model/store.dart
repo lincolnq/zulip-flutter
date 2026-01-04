@@ -26,6 +26,7 @@ import 'message.dart';
 import 'presence.dart';
 import 'push_device.dart';
 import 'realm.dart';
+import 'recent_conversations.dart';
 import 'recent_dm_conversations.dart';
 import 'recent_senders.dart';
 import 'server_support.dart';
@@ -556,6 +557,11 @@ class PerAccountStore extends PerAccountStoreBase with
       userMap: userMap);
     final channels = ChannelStoreImpl(users: users,
       initialSnapshot: initialSnapshot);
+    final unreads = Unreads(core: core, channelStore: channels,
+      initial: initialSnapshot.unreadMsgs);
+    final recentDmConversationsView = RecentDmConversationsView(core: core,
+      initial: initialSnapshot.recentPrivateConversations);
+
     return PerAccountStore._(
       core: core,
       groups: groups,
@@ -574,10 +580,12 @@ class PerAccountStore extends PerAccountStoreBase with
       channels: channels,
       topics: Topics(core: core),
       messages: MessageStoreImpl(channels: channels),
-      unreads: Unreads(core: core, channelStore: channels,
-        initial: initialSnapshot.unreadMsgs),
-      recentDmConversationsView: RecentDmConversationsView(core: core,
-        initial: initialSnapshot.recentPrivateConversations),
+      unreads: unreads,
+      recentDmConversationsView: recentDmConversationsView,
+      recentConversationsView: RecentConversationsView(
+        core: core,
+        dmView: recentDmConversationsView,
+        unreads: unreads),
       recentSenders: RecentSenders(),
     );
   }
@@ -599,6 +607,7 @@ class PerAccountStore extends PerAccountStoreBase with
     required MessageStoreImpl messages,
     required this.unreads,
     required this.recentDmConversationsView,
+    required this.recentConversationsView,
     required this.recentSenders,
   }) : _groups = groups,
        _realm = realm,
@@ -726,6 +735,8 @@ class PerAccountStore extends PerAccountStoreBase with
 
   final RecentDmConversationsView recentDmConversationsView;
 
+  final RecentConversationsView recentConversationsView;
+
   final RecentSenders recentSenders;
 
   //|//////////////////////////////
@@ -750,6 +761,7 @@ class PerAccountStore extends PerAccountStoreBase with
   @override
   void dispose() {
     assert(!_disposed);
+    recentConversationsView.dispose();
     recentDmConversationsView.dispose();
     unreads.dispose();
     _messages.dispose();
@@ -883,6 +895,7 @@ class PerAccountStore extends PerAccountStoreBase with
         _messages.handleMessageEvent(event);
         unreads.handleMessageEvent(event);
         recentDmConversationsView.handleMessageEvent(event);
+        recentConversationsView.handleMessageEvent(event);
         recentSenders.handleMessage(event.message); // TODO(#824)
         topics.handleMessageEvent(event);
         // When adding anything here (to handle [MessageEvent]),
@@ -892,6 +905,7 @@ class PerAccountStore extends PerAccountStoreBase with
         assert(debugLog("server event: update_message ${event.messageId}"));
         _messages.handleUpdateMessageEvent(event);
         unreads.handleUpdateMessageEvent(event);
+        recentConversationsView.handleUpdateMessageEvent(event);
         topics.handleUpdateMessageEvent(event);
 
       case DeleteMessageEvent():
@@ -903,6 +917,7 @@ class PerAccountStore extends PerAccountStoreBase with
         recentSenders.handleDeleteMessageEvent(event, messages);
         _messages.handleDeleteMessageEvent(event);
         unreads.handleDeleteMessageEvent(event);
+        recentConversationsView.handleDeleteMessageEvent(event);
 
       case UpdateMessageFlagsEvent():
         assert(debugLog("server event: update_message_flags/${event.op} ${event.flag.toJson()}"));
