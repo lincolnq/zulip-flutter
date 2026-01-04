@@ -577,14 +577,25 @@ class RecentConversationsView extends PerAccountStoreBase with ChangeNotifier {
         latestSenderId: message.senderId,
       );
       _insertSorted(newConv);
-    } else if (_previewCache[prev] == null) {
-      // We have a newer message ID but no preview - update preview from this message
-      // This can happen when initial data came from unreads (just message IDs)
-      // In this case we should update the conversation to use the backfilled data
-      // Actually, we should update the cached preview for the newer message if we find it
-      // For now, just populate the preview for this older message
-      // The conversation will keep its newer message ID but won't have preview
+    } else if (messageId == prev) {
+      // Same message we already knew about - update with cached preview data
+      // This happens when initial data had just the message ID but no content
+      final index = sorted.indexWhere((c) =>
+          c is RecentTopicConversation &&
+          c.streamId == streamId &&
+          c.topic.isSameAs(topic));
+      if (index >= 0) {
+        sorted[index] = RecentTopicConversation(
+          streamId: streamId,
+          topic: topic,
+          latestMessageId: messageId,
+          latestTimestamp: message.timestamp,
+          previewText: _previewCache[messageId],
+          latestSenderId: message.senderId,
+        );
+      }
     }
+    // messageId < prev: older message, ignore
   }
 
   void _updateDmFromBackfill(DmMessage message) {
@@ -626,6 +637,21 @@ class RecentConversationsView extends PerAccountStoreBase with ChangeNotifier {
         latestSenderId: message.senderId,
       );
       _insertSorted(newConv);
+    } else if (messageId == prev) {
+      // Same message we already knew about - update with cached preview data
+      // This happens when initial data had just the message ID but no content
+      final index = sorted.indexWhere((c) =>
+          c is RecentDmConversation && c.dmNarrow == dmNarrow);
+      if (index >= 0) {
+        sorted[index] = RecentDmConversation(
+          dmNarrow: dmNarrow,
+          latestMessageId: messageId,
+          latestTimestamp: message.timestamp,
+          previewText: _previewCache[messageId],
+          latestSenderId: message.senderId,
+        );
+      }
     }
+    // messageId < prev: older message, ignore
   }
 }
