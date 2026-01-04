@@ -37,13 +37,31 @@ void _extractText(dom.Node node, StringBuffer buffer, int maxLength) {
     // Handle special elements
     switch (tagName) {
       case 'img':
-        final alt = node.attributes['alt'];
-        if (alt != null && alt.isNotEmpty) {
-          buffer.write('[$alt]');
-        } else {
-          buffer.write('[image]');
-        }
+        // Use photo emoji for images
+        buffer.write('📷');
         return;
+
+      case 'a':
+        // Check if this is a file attachment (uploaded file link)
+        final href = node.attributes['href'] ?? '';
+        if (href.contains('/user_uploads/') ||
+            node.classes.contains('message_inline_image')) {
+          // Check if it's an image by extension
+          final lowerHref = href.toLowerCase();
+          if (lowerHref.endsWith('.png') ||
+              lowerHref.endsWith('.jpg') ||
+              lowerHref.endsWith('.jpeg') ||
+              lowerHref.endsWith('.gif') ||
+              lowerHref.endsWith('.webp')) {
+            buffer.write('📷');
+          } else {
+            // Other file attachment
+            buffer.write('📎');
+          }
+          return;
+        }
+        // Regular link - process children normally
+        break;
 
       case 'pre':
       case 'code':

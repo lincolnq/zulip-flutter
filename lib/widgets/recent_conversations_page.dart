@@ -187,8 +187,11 @@ class RecentConversationItem extends StatelessWidget {
               style: TextStyle(color: designVariables.icon),
             ),
             TextSpan(
-              text: topic.displayName,
-              style: TextStyle(color: designVariables.labelMenuButton),
+              text: topic.displayName ?? store.realmEmptyTopicDisplayName,
+              style: TextStyle(
+                color: designVariables.labelMenuButton,
+                fontStyle: topic.displayName == null ? FontStyle.italic : null,
+              ),
             ),
           ]),
           maxLines: 1,
@@ -253,9 +256,61 @@ class RecentConversationItem extends StatelessWidget {
         store.unreads.countInDmNarrow(dmNarrow),
     };
 
-    // Build preview text
-    final previewText = conversation.previewText;
-    final senderName = store.userDisplayName(conversation.latestSenderId);
+    // Build preview text with sender name logic
+    final previewText = conversation.previewText ?? '...';
+
+    // Determine if we should show sender name:
+    // - Don't show for 1:1 DMs (including self-to-self)
+    // - Show "You" for self in groups/topics
+    // - Show first name only for others
+    final bool showSenderName;
+    switch (conversation) {
+      case RecentDmConversation(:final dmNarrow):
+        // Don't show sender for 1:1 DMs or self-to-self
+        showSenderName = dmNarrow.otherRecipientIds.length > 1;
+      case RecentTopicConversation():
+        showSenderName = true;
+    }
+
+    String? senderDisplayName;
+    if (showSenderName && conversation.latestSenderId != 0) {
+      if (conversation.latestSenderId == store.selfUserId) {
+        senderDisplayName = 'You';
+      } else {
+        final fullName = store.userDisplayName(conversation.latestSenderId);
+        // Use first name only (first word before space)
+        final spaceIndex = fullName.indexOf(' ');
+        senderDisplayName = spaceIndex > 0 ? fullName.substring(0, spaceIndex) : fullName;
+      }
+    }
+
+    final previewStyle = TextStyle(
+      fontSize: 14,
+      height: 18 / 14,
+      color: designVariables.labelEdited,
+    );
+
+    final Widget previewWidget;
+    if (senderDisplayName != null) {
+      previewWidget = Text.rich(
+        TextSpan(children: [
+          TextSpan(
+            text: '$senderDisplayName: ',
+            style: previewStyle.copyWith(fontWeight: FontWeight.w600),
+          ),
+          TextSpan(text: previewText, style: previewStyle),
+        ]),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      );
+    } else {
+      previewWidget = Text(
+        previewText,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: previewStyle,
+      );
+    }
 
     return Material(
       color: designVariables.background,
@@ -280,18 +335,7 @@ class RecentConversationItem extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      previewText != null
-                          ? '$senderName: $previewText'
-                          : '$senderName: ...',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 14,
-                        height: 18 / 14,
-                        color: designVariables.labelEdited,
-                      ),
-                    ),
+                    previewWidget,
                   ],
                 ),
               ),
