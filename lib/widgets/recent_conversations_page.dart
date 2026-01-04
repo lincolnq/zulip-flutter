@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart' as intl;
 
 import '../model/recent_conversations.dart';
 import 'icons.dart';
@@ -173,30 +173,17 @@ class RecentConversationItem extends StatelessWidget {
           ),
         );
 
-        title = Text.rich(
-          TextSpan(children: [
-            TextSpan(
-              text: '#$streamName',
-              style: TextStyle(
-                color: streamColor,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            TextSpan(
-              text: ' > ',
-              style: TextStyle(color: designVariables.icon),
-            ),
-            TextSpan(
-              text: topic.displayName ?? store.realmEmptyTopicDisplayName,
-              style: TextStyle(
-                color: designVariables.labelMenuButton,
-                fontStyle: topic.displayName == null ? FontStyle.italic : null,
-              ),
-            ),
-          ]),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 16, height: 20 / 16),
+        title = _ChannelTopicTitle(
+          channelName: streamName,
+          channelColor: streamColor,
+          topicName: topic.displayName ?? store.realmEmptyTopicDisplayName,
+          topicStyle: TextStyle(
+            color: designVariables.labelMenuButton,
+            fontStyle: topic.displayName == null ? FontStyle.italic : null,
+            fontSize: 16,
+            height: 20 / 16,
+          ),
+          separatorColor: designVariables.icon,
         );
 
       case RecentDmConversation(:final dmNarrow):
@@ -360,6 +347,125 @@ class RecentConversationItem extends StatelessWidget {
   }
 }
 
+class _ChannelTopicTitle extends StatelessWidget {
+  const _ChannelTopicTitle({
+    required this.channelName,
+    required this.channelColor,
+    required this.topicName,
+    required this.topicStyle,
+    required this.separatorColor,
+  });
+
+  final String channelName;
+  final Color channelColor;
+  final String topicName;
+  final TextStyle topicStyle;
+  final Color separatorColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final textScaler = MediaQuery.textScalerOf(context);
+
+    final channelStyle = TextStyle(
+      color: channelColor,
+      fontWeight: FontWeight.w600,
+      fontSize: 16,
+      height: 20 / 16,
+    );
+    final separatorStyle = TextStyle(
+      color: separatorColor,
+      fontSize: 16,
+      height: 20 / 16,
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final available = constraints.maxWidth;
+
+        // Measure natural widths
+        final channelPainter = TextPainter(
+          text: TextSpan(text: '#$channelName', style: channelStyle),
+          maxLines: 1,
+          textScaler: textScaler,
+          textDirection: TextDirection.ltr,
+        )..layout();
+
+        final separatorPainter = TextPainter(
+          text: TextSpan(text: ' > ', style: separatorStyle),
+          maxLines: 1,
+          textScaler: textScaler,
+          textDirection: TextDirection.ltr,
+        )..layout();
+
+        final topicPainter = TextPainter(
+          text: TextSpan(text: topicName, style: topicStyle),
+          maxLines: 1,
+          textScaler: textScaler,
+          textDirection: TextDirection.ltr,
+        )..layout();
+
+        final channelNatural = channelPainter.width;
+        final separatorWidth = separatorPainter.width;
+        final topicNatural = topicPainter.width;
+
+        final textSpace = available - separatorWidth;
+        final totalNeeded = channelNatural + topicNatural;
+
+        double channelMax, topicMax;
+
+        if (totalNeeded <= textSpace) {
+          // Everything fits naturally
+          channelMax = channelNatural;
+          topicMax = topicNatural;
+        } else {
+          // Need to constrain - topic gets priority (3:1 = 75%)
+          final channelFloor = textSpace * 0.25;
+          final topicFloor = textSpace * 0.75;
+
+          if (channelNatural <= channelFloor) {
+            // Channel is short - give rest to topic
+            channelMax = channelNatural;
+            topicMax = textSpace - channelNatural;
+          } else if (topicNatural <= topicFloor) {
+            // Topic is short - give rest to channel
+            topicMax = topicNatural;
+            channelMax = textSpace - topicNatural;
+          } else {
+            // Both need constraining - use 1:3 split
+            channelMax = channelFloor;
+            topicMax = topicFloor;
+          }
+        }
+
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: channelMax),
+              child: Text(
+                '#$channelName',
+                style: channelStyle,
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            ),
+            Text(' > ', style: separatorStyle),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: topicMax),
+              child: Text(
+                topicName,
+                style: topicStyle,
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class _RecencyIndicator extends StatelessWidget {
   const _RecencyIndicator({required this.timestamp});
 
@@ -396,9 +502,9 @@ class _RecencyIndicator extends StatelessWidget {
     if (time.isAfter(yesterday)) return 'Yesterday';
 
     // Within the last week, show day name
-    if (diff.inDays < 7) return DateFormat.E().format(time);
+    if (diff.inDays < 7) return intl.DateFormat.E().format(time);
 
     // Older: show month and day
-    return DateFormat.MMMd().format(time);
+    return intl.DateFormat.MMMd().format(time);
   }
 }
