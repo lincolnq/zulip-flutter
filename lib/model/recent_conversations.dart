@@ -371,7 +371,8 @@ class RecentConversationsView extends PerAccountStoreBase with ChangeNotifier {
       _processBackfillMessages(relevant);
 
       if (result.messages.isNotEmpty) {
-        _oldestMessageIdSeen = result.messages.last.id;
+        // Messages are returned in ascending order, so first is oldest
+        _oldestMessageIdSeen = result.messages.first.id;
       }
       _reachedOldest = result.foundOldest;
       _initialFetchDone = true;
@@ -404,7 +405,8 @@ class RecentConversationsView extends PerAccountStoreBase with ChangeNotifier {
       _processBackfillMessages(relevant);
 
       if (result.messages.isNotEmpty) {
-        _oldestMessageIdSeen = result.messages.last.id;
+        // Messages are returned in ascending order, so first is oldest
+        _oldestMessageIdSeen = result.messages.first.id;
       }
       _reachedOldest = result.foundOldest;
     } finally {
