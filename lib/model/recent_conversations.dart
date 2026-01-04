@@ -8,9 +8,7 @@ import '../api/route/messages.dart';
 import 'channel.dart';
 import 'content_preview.dart';
 import 'narrow.dart';
-import 'recent_dm_conversations.dart';
 import 'store.dart';
-import 'unreads.dart';
 
 /// A recent conversation (either stream topic or DM) with preview metadata.
 sealed class RecentConversation {
@@ -94,87 +92,21 @@ class RecentDmConversation extends RecentConversation {
 ///
 /// This maintains a unified list of recent conversations (both DMs and topics),
 /// sorted by latest message ID, plus preview text and metadata.
+///
+/// The list starts empty and is populated by [fetchInitial] which fetches
+/// recent messages from the CombinedFeed API.
 class RecentConversationsView extends PerAccountStoreBase with ChangeNotifier {
   factory RecentConversationsView({
     required CorePerAccountStore core,
-    required RecentDmConversationsView dmView,
-    required Unreads unreads,
   }) {
-    final topicLatest = <int, TopicKeyedMap<int>>{};
-    final dmLatest = <DmNarrow, int>{};
-    final previewCache = <int, String>{};
-    final timestampCache = <int, int>{};
-    final senderCache = <int, int>{};
-
-    // Copy DM data from RecentDmConversationsView
-    for (final entry in dmView.map.entries) {
-      dmLatest[entry.key] = entry.value;
-    }
-
-    // Build topic data from unreads
-    // We only know about topics that have unreads initially
-    for (final streamEntry in unreads.streams.entries) {
-      final streamId = streamEntry.key;
-      final topicsMap = topicLatest.putIfAbsent(streamId, makeTopicKeyedMap);
-      for (final topicEntry in streamEntry.value.entries) {
-        final topic = topicEntry.key;
-        final messageIds = topicEntry.value;
-        if (messageIds.isNotEmpty) {
-          // Latest message is the last one in the sorted list
-          final latestId = messageIds.reduce((a, b) => a > b ? a : b);
-          topicsMap[topic] = latestId;
-        }
-      }
-    }
-
-    // Merge and sort
-    final allEntries = <({RecentConversation conv, int messageId})>[];
-
-    for (final streamEntry in topicLatest.entries) {
-      final streamId = streamEntry.key;
-      for (final topicEntry in streamEntry.value.entries) {
-        final topic = topicEntry.key;
-        final messageId = topicEntry.value;
-        allEntries.add((
-          conv: RecentTopicConversation(
-            streamId: streamId,
-            topic: topic,
-            latestMessageId: messageId,
-            latestTimestamp: timestampCache[messageId] ?? 0,
-            previewText: previewCache[messageId],
-            latestSenderId: senderCache[messageId] ?? 0,
-          ),
-          messageId: messageId,
-        ));
-      }
-    }
-
-    for (final entry in dmLatest.entries) {
-      final dmNarrow = entry.key;
-      final messageId = entry.value;
-      allEntries.add((
-        conv: RecentDmConversation(
-          dmNarrow: dmNarrow,
-          latestMessageId: messageId,
-          latestTimestamp: timestampCache[messageId] ?? 0,
-          previewText: previewCache[messageId],
-          latestSenderId: senderCache[messageId] ?? 0,
-        ),
-        messageId: messageId,
-      ));
-    }
-
-    // Sort by message ID descending
-    allEntries.sort((a, b) => b.messageId.compareTo(a.messageId));
-
     return RecentConversationsView._(
       core: core,
-      sorted: QueueList.from(allEntries.map((e) => e.conv)),
-      topicLatest: topicLatest,
-      dmLatest: dmLatest,
-      previewCache: previewCache,
-      timestampCache: timestampCache,
-      senderCache: senderCache,
+      sorted: QueueList(),
+      topicLatest: {},
+      dmLatest: {},
+      previewCache: {},
+      timestampCache: {},
+      senderCache: {},
     );
   }
 

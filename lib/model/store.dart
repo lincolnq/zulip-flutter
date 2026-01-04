@@ -582,10 +582,7 @@ class PerAccountStore extends PerAccountStoreBase with
       messages: MessageStoreImpl(channels: channels),
       unreads: unreads,
       recentDmConversationsView: recentDmConversationsView,
-      recentConversationsView: RecentConversationsView(
-        core: core,
-        dmView: recentDmConversationsView,
-        unreads: unreads),
+      recentConversationsView: RecentConversationsView(core: core),
       recentSenders: RecentSenders(),
     );
   }
